@@ -9,5 +9,6 @@
 | ML-SuperRes-VR | PyTorch | 4× upsample &lt; 11 ms on Quest 3 |
 
 ## CV
-`True-Internship-CV.docx` – Meta-ready SWE intern résumé (ATS clean).
+`True-Internship-CV.docx` – SWE intern résumé (ATS clean).
+
 
