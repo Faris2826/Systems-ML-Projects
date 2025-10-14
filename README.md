@@ -10,7 +10,3 @@
 
 ## CV
 `meta-cv-faris.docx` – Meta-ready SWE intern résumé (ATS clean).
-
----
-
-Clone & push to your own GitHub; all folders contain runnable code + README.
