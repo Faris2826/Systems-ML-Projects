@@ -9,4 +9,5 @@
 | ML-SuperRes-VR | PyTorch | 4× upsample &lt; 11 ms on Quest 3 |
 
 ## CV
-`meta-cv-faris.docx` – Meta-ready SWE intern résumé (ATS clean).
+`True-Internship-CV.docx` – Meta-ready SWE intern résumé (ATS clean).
+
