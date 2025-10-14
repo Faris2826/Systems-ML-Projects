@@ -1,0 +1,223 @@
+name: CI Pipeline
+
+on:
+  workflow_call:
+
+jobs:
+  pre-commit-check:
+    name: "Pre-commit check"
+    uses: ./.github/workflows/pre-commit.yml
+
+  docker-tag:
+    name: Check if 'latest' tag could be used (no build docker images)
+    runs-on: ubuntu-latest
+    needs: pre-commit-check
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/docker-tag
+        id: tag
+        with:
+          dockerfile: Jenkins/fast-release/Dockerfile.ci
+
+  variants:
+    name: Define supported AIMET variants
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.final.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get changed files
+        id: diff
+        uses: ./.github/actions/changed-files
+      - name: Select AIMET variants that needs testing
+        id: select
+        env:
+          ALL_CHANGED_FILES: ${{ steps.diff.outputs.changed_files }}
+          AIMET_COMMON_ONNX_UTILS_SRC_CODE: "TrainingExtensions/common/src/python/aimet_common/onnx/"
+          AIMET_TORCH_SRC_CODE:             "TrainingExtensions/torch/"
+          AIMET_ONNX_SRC_CODE:              "TrainingExtensions/onnx/"
+          DOC_SRC_CODE:                     "Docs/"
+          EXAMPLES_SRC_CODE:                "Examples/"
+        shell: bash
+        run: |
+          set -x
+
+          TORCH_TEST_REQUIRED='false'
+          ONNX_TEST_REQUIRED='false'
+
+          for file in ${ALL_CHANGED_FILES}; do
+            if [[ "$file" == "$AIMET_COMMON_ONNX_UTILS_SRC_CODE"* ]]; then
+              TORCH_TEST_REQUIRED='true'
+              ONNX_TEST_REQUIRED='true'
+            elif [[ "$file" == "$AIMET_TORCH_SRC_CODE"* ]]; then
+              TORCH_TEST_REQUIRED='true'
+            elif [[ "$file" == "$AIMET_ONNX_SRC_CODE"* ]]; then
+              ONNX_TEST_REQUIRED='true'
+            elif [[ "$file" == "$DOC_SRC_CODE"* ]]; then
+              : # Documentation change doesn't require running unit tests; only doc rebuild is needed
+            elif [[ "$file" == "$EXAMPLES_SRC_CODE"* ]]; then
+              : # Examples change doesn't require running unit tests; only doc rebuild is needed
+            else
+              TORCH_TEST_REQUIRED='true'
+              ONNX_TEST_REQUIRED='true'
+              break
+            fi
+          done
+
+          echo "test_torch=$TORCH_TEST_REQUIRED" >> $GITHUB_OUTPUT
+          echo "test_onnx=$ONNX_TEST_REQUIRED"   >> $GITHUB_OUTPUT
+      - name: Torch variants
+        # For the default branch, we still test all variants every time (yet)
+        if: steps.select.outputs.test_torch == 'true' || github.ref_name == github.event.repository.default_branch
+        run: |
+          VALUE=$(echo "${VALUE:-"{}"}" | jq -c '.include += [
+              {
+                 "id":              "torch-cpu",
+                 "runs-on":         "ubuntu-latest",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "2.*",
+                 "VER_ONNXRUNTIME": "",
+                 "VER_CUDA":        "",
+                 "RUN_UNIT_TESTS":    "ON",
+                 "RUN_ACCEPTANCE_TESTS":    "OFF",
+                 "BUILD_TARGETS":   "all",
+                 "PIP_INDEX":       ""
+              },
+              {
+                 "id":              "torch-gpu",
+                 "runs-on":         "k8s-gpu",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "2.*",
+                 "VER_ONNXRUNTIME": "",
+                 "VER_CUDA":        "12.1.1",
+                 "RUN_UNIT_TESTS":    "ON",
+                 "RUN_ACCEPTANCE_TESTS":    "OFF",
+                 "BUILD_TARGETS":   "all",
+                 "PIP_INDEX":       ""
+              }
+            ]')
+          echo "VALUE=$VALUE" >> $GITHUB_ENV
+      - name: ONNX variants
+        # For the default branch, we still test all variants every time (yet)
+        if: steps.select.outputs.test_onnx == 'true' || github.ref_name == github.event.repository.default_branch
+        run: |
+          VALUE=$(echo "${VALUE:-"{}"}" | jq -c '.include += [
+              {
+                 "id":              "onnx-cpu",
+                 "runs-on":         "ubuntu-latest",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "",
+                 "VER_ONNXRUNTIME": "1.19.2",
+                 "RUN_UNIT_TESTS":    "ON",
+                 "RUN_ACCEPTANCE_TESTS":    "OFF",
+                 "BUILD_TARGETS":   "all",
+                 "PIP_INDEX":       ""
+              },
+              {
+                 "id":              "onnx-gpu",
+                 "runs-on":         "k8s-gpu",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "",
+                 "VER_ONNXRUNTIME": "1.19.2",
+                 "VER_CUDA":        "12.1.0",
+                 "RUN_UNIT_TESTS":    "ON",
+                 "RUN_ACCEPTANCE_TESTS":    "OFF",
+                 "BUILD_TARGETS":   "all",
+                 "PIP_INDEX":       ""
+              }
+            ]')
+          echo "VALUE=$VALUE" >> $GITHUB_ENV
+
+      - name: Doc variants
+        run: |
+          VALUE=$(echo "${VALUE:-"{}"}" | jq -c '.include += [
+              {
+                 "id":              "onnx-torch-cpu",
+                 "runs-on":         "ubuntu-latest",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "2.*",
+                 "VER_ONNXRUNTIME": "1.19.2",
+                 "VER_CUDA":        "",
+                 "RUN_UNIT_TESTS":    "OFF",
+                 "RUN_ACCEPTANCE_TESTS":    "OFF",
+                 "BUILD_TARGETS":   "all;doc",
+                 "PIP_INDEX":       ""
+              }
+            ]')
+          echo "VALUE=$VALUE" >> $GITHUB_ENV
+
+      - name: (Last step) Generate few extra properties for each variant
+        id: final
+        run: |
+          echo "value=$VALUE" >> $GITHUB_OUTPUT
+
+  docker-build-image:
+    name: Docker image ${{ matrix.id }}
+    runs-on: ubuntu-latest
+    needs: [docker-tag, variants]
+    strategy:
+      matrix: ${{ fromJSON(needs.variants.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/docker-build-image
+        with:
+          dockerfile: Jenkins/fast-release/Dockerfile.ci
+          docker-login: ${{ secrets.DOCKER_LOGIN }}
+          docker-password: ${{ secrets.DOCKER_CREDENTIALS }}
+          docker-registry: ${{ vars.DOCKER_REGISTRY }}
+          image-name: "${{ vars.DOCKER_IMAGE }}-${{ matrix.id }}"
+          image-tag: ${{ needs.docker-tag.outputs.tag }}
+          build-args: |
+            VER_PYTHON=${{ matrix.VER_PYTHON }}
+            VER_CUDA=${{ matrix.VER_CUDA }}
+            VER_TORCH=${{ matrix.VER_TORCH }}
+            VER_ONNXRUNTIME=${{ matrix.VER_ONNXRUNTIME }}
+            AIMET_VARIANT=${{ matrix.id }}
+
+  call-build-wheels:
+    name: Call build-wheels
+    needs: [ docker-tag, variants, docker-build-image ]
+    uses: ./.github/workflows/build-wheels.yml
+    with:
+      variants: ${{ needs.variants.outputs.matrix }}
+      image-tag: ${{ needs.docker-tag.outputs.tag }}
+    secrets: inherit
+
+  call-run-unit-acceptance-tests:
+    name: Run unit tests
+    needs: [ variants, call-build-wheels ]
+    uses: ./.github/workflows/run-unit-acceptance-tests.yml
+    with:
+      variants: ${{ needs.variants.outputs.matrix }}
+    secrets: inherit
+
+  docker-push-latest:
+    needs: [docker-tag, variants, call-run-unit-acceptance-tests]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.variants.outputs.matrix) }}
+    steps:
+      - run: sudo sh -c "cp /tmp/certs/* /usr/local/share/ca-certificates/ && update-ca-certificates"
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.DOCKER_REGISTRY }}
+          username: ${{ secrets.DOCKER_LOGIN }}
+          password: ${{ secrets.DOCKER_CREDENTIALS }}
+      - name: Create the 'latest' docker image tag
+        if: ${{ github.ref_name == github.event.repository.default_branch && needs.docker-tag.outputs.tag != 'latest' }}
+        run: docker buildx imagetools create ${{ vars.DOCKER_REGISTRY }}/${{ vars.DOCKER_IMAGE }}-${{ matrix.id }}:${{ needs.docker-tag.outputs.tag }} --tag ${{ vars.DOCKER_REGISTRY }}/${{ vars.DOCKER_IMAGE }}-${{ matrix.id }}:latest
+
+  cleanup:
+    needs: [docker-tag, variants, docker-push-latest]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.variants.outputs.matrix) }}
+    steps:
+      - name: Delete temp docker image
+        if: needs.docker-tag.outputs.tag != 'latest'
+        run: curl -k -H "Authorization:Bearer ${{ secrets.DOCKER_CREDENTIALS }}" -X DELETE "https://${{ vars.DOCKER_REGISTRY }}/v2/${{ vars.DOCKER_IMAGE }}-${{ matrix.id }}/manifests/${{ needs.docker-tag.outputs.tag }}" || true

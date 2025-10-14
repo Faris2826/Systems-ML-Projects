@@ -1,0 +1,151 @@
+{
+  "defaults":
+  {
+    "hw_version": "V68",
+    "ops":
+    {
+      "is_output_quantized": "True"
+    },
+    "params":
+    {
+      "is_quantized": "True",
+      "is_symmetric": "True"
+    },
+    "per_channel_quantization": "True",
+    "strict_symmetric": "False",
+    "unsigned_symmetric": "False"
+  },
+
+  "params":
+  {
+    "bias":
+    {
+      "is_quantized": "False"
+    }
+  },
+
+  "op_type":
+  {
+    "Cast":
+    {
+      "is_output_quantized": "False"
+    },
+    "BatchPermutation":
+    {
+      "is_output_quantized": "False"
+    },
+    "ChannelShuffle":
+    {
+      "is_output_quantized": "False"
+    },
+    "CropAndResize":
+    {
+      "is_output_quantized": "False"
+    },
+    "Gather":
+    {
+      "per_channel_quantization": "False"
+    },
+    "Gemm":
+    {
+      "per_channel_quantization": "False"
+    },
+    "RMSNormalization":
+    {
+      "per_channel_quantization": "False",
+      "params": {
+        "weight": {
+          "is_symmetric": "False"
+        }
+      }
+    },
+    "MatMul":
+    {
+      "per_channel_quantization": "False"
+    },
+    "Upsample":
+    {
+      "is_output_quantized": "False"
+    },
+    "Tanh":
+    {
+      "encoding_constraints":
+      {
+        "min": -1.0,
+        "max": 1.0
+      }
+    },
+    "Relu":
+    {
+      "encoding_constraints":
+      {
+        "min": 0.0
+      }
+    },
+    "NonMaxSuppression":
+    {
+      "is_output_quantized": "False"
+    },
+    "Mean":
+    {
+      "is_output_quantized": "False"
+    },
+    "LayerNormalization":
+    {
+      "per_channel_quantization": "False",
+      "params": {
+        "weight": {
+          "is_symmetric": "False"
+        }
+      }
+    },
+    "BatchNormalization":
+    {
+      "per_channel_quantization": "False",
+      "params": {
+        "running_mean": {
+          "is_quantized": "False"
+        },
+        "running_var": {
+          "is_quantized": "False"
+        }
+      }
+    },
+    "InstanceNormalization":
+    {
+      "per_channel_quantization": "False",
+      "params": {
+        "weight": {
+          "is_symmetric": "False"
+        }
+      }
+    }
+  },
+
+  "supergroup_pass_list":
+  [
+    "LayerNormalization",
+    "RMSNormalization",
+    "MatmulAdd"
+  ],
+  "supergroups":
+  [
+    {
+      "op_list": ["ConvTranspose", "Relu"]
+    },
+    {
+      "op_list": ["Add", "Relu"]
+    },
+    {
+      "op_list": ["Gemm", "Relu"]
+    }
+  ],
+
+  "model_input":
+  {
+    "is_input_quantized": "True"
+  },
+
+  "model_output":
+  {}
+}

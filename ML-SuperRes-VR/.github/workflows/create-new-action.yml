@@ -1,0 +1,18 @@
+# Create new Github Action
+# Use this action as a playground to validate and test your action
+
+name: Create New Github Action
+
+on:
+  # Allows this workflow to be callable
+  workflow_call:
+
+  # Allows this workflow to be manually triggered.
+  workflow_dispatch:
+
+jobs:
+  dummy:
+    name: Create new action
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Running new dummy action"

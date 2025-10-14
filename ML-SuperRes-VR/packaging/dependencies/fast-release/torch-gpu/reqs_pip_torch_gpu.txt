@@ -1,0 +1,24 @@
+bokeh<=3.6.3
+cvxpy
+holoviews
+hvplot
+Jinja2>=3.0.3
+jsonschema
+matplotlib>=3
+networkx
+numpy<2
+onnx
+onnxscript>=0.2.0
+osqp
+pandas
+psutil
+pybind11
+PyYAML
+# pinned because versions > 0.5.3 require torch >= 2.3.0
+safetensors==0.5.3
+scikit-learn
+scipy
+tensorboard
+torch
+torchvision
+tqdm

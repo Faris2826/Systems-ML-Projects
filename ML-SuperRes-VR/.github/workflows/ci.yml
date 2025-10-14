@@ -1,0 +1,25 @@
+name: CI pipeline
+
+on:
+  push:
+    branches: [ develop ]
+  pull_request:
+    branches: [ develop, release-* ]
+
+# Cancel in-progress runs exclusively for PR jobs. `github.head_ref` is defined only for PRs,
+# for post-merge, it defaults to `github.run_id`, which is guaranteed to be unique.
+concurrency:
+  group: ${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+
+  dco:
+    if: github.server_url != 'https://github.com'
+    uses: ./.github/workflows/dco.yml
+
+  pipeline:
+    if: github.server_url != 'https://github.com'
+    needs: dco
+    uses: ./.github/workflows/pipeline.yml
+    secrets: inherit

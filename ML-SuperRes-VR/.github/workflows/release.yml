@@ -1,0 +1,80 @@
+name: Release AIMET
+
+on:
+  push:
+    branches: [ release-* ]
+
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "AIMET version to release"
+        required: true
+        type: string
+      push_to_pypi:
+        description: "Push to pypi if true"
+        required: false
+        type: boolean
+        default: false
+      push_to_github:
+        description: "Push to github (code & release)"
+        required: false
+        type: boolean
+        default: false
+      push_docs:
+        description: "Puts up a PR on aimet-pages"
+        required: false
+        type: boolean
+        default: false
+
+# Cancel in-progress runs
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: true
+
+env:
+  REPO_DIR: "aimet-repo"
+
+jobs:
+  read_aimet_version:
+    if: ${{ github.event_name == 'push' && github.server_url != 'https://github.com' }}
+    name: Read AIMET version from branch
+    runs-on: ubuntu-latest
+    outputs:
+      aimet_version: ${{ steps.set_outputs.outputs.AIMET_VERSION }}
+    steps:
+      - name: Checkout release branch
+        id: checkout_branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          path: ${{ env.REPO_DIR }}
+          fetch-depth: 0
+      - name: Get AIMET version from release branch
+        id: set_outputs
+        run: |
+          AIMET_VERSION=`head -n 1 ${{ env.REPO_DIR }}/packaging/version.txt`
+          # write AIMET_VERSION to output
+          echo "AIMET_VERSION=${AIMET_VERSION}" >> "$GITHUB_OUTPUT"
+
+  release_via_push_event:
+    name: Release AIMET to public (Automated)
+    if: ${{ github.event_name == 'push' && github.server_url != 'https://github.com' }}
+    needs: read_aimet_version
+    uses: ./.github/workflows/release-workflow.yml
+    with:
+      version: ${{ needs.read_aimet_version.outputs.aimet_version }}
+      push_to_pypi: true
+      push_to_github: true
+      push_docs: true
+    secrets: inherit
+
+  release_via_manual_workflow:
+    if: ${{ github.event_name == 'workflow_dispatch' && github.server_url != 'https://github.com' }}
+    name: Release AIMET to public (Manual)
+    uses: ./.github/workflows/release-workflow.yml
+    with:
+      version: ${{ inputs.version }}
+      push_to_pypi: ${{ inputs.push_to_pypi }}
+      push_to_github: ${{ inputs.push_to_github }}
+      push_docs: ${{ inputs.push_docs }}
+    secrets: inherit

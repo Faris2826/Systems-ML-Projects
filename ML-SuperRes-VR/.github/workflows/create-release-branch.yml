@@ -1,0 +1,66 @@
+name: Create Release Branch
+
+on:
+  workflow_dispatch:
+
+env:
+  REPO_DIR: "aimet-repo"
+
+jobs:
+  create_release_branch:
+    name: Create Release Branch
+    if: ${{  github.server_url != 'https://github.com' }}
+    runs-on: ubuntu-latest
+    outputs:
+      release_branch: ${{ steps.create_branch.outputs.RELEASE_BRANCH_NAME }}
+    steps:
+      - name: Checkout internal repo
+        uses: actions/checkout@v4
+        with:
+          path: ${{ env.REPO_DIR }}
+          fetch-depth: 0
+
+      - name: Validate version in source branch
+        id: validate
+        run: |
+          repo_version=`head -n 1 ${{ env.REPO_DIR }}/packaging/version.txt`
+          input_version_parts=`echo $repo_version | grep -o '\.' | wc -l`
+
+          # Validate version in source branch
+          if [[ ${input_version_parts} != 2 ]]; then
+              echo "Incorrect version in ${{ github.ref_name }}. Got ${{ inputs.version }}, expecting semantic versioning i.e. <major>.<minor>.<patch>"
+              echo "Refer to https://semver.org/"
+              exit 1
+          fi
+
+      - name: Create release branch
+        id: create_branch
+        run: |
+          cd ${{ env.REPO_DIR }}
+          major_minor_version=`head -n 1 packaging/version.txt | cut -d'.' -f 1,2`
+          release_branch_name="release-aimet-${major_minor_version}"
+
+          # if branch exists, stop workflow.
+          if [[ $(git ls-remote origin ${release_branch_name}) ]]; then
+            echo "Branch ${release_branch_name} exists on remote."
+            echo "If trying to create release branch, please ensure aimet_version is updated correctly."
+            echo "If trying to push more changes into release branch, please put up a PR instead."
+
+            exit 1
+          else
+            echo "Pushing ${release_branch_name} to remote."
+
+            git checkout -b ${release_branch_name}
+            git push origin ${release_branch_name}
+
+            # write release branch name to output
+            echo "RELEASE_BRANCH_NAME=${release_branch_name}" >> "$GITHUB_OUTPUT"
+          fi
+
+  nightly_for_release_branch:
+    needs: create_release_branch
+    name: Nightly pipeline
+    secrets: inherit
+    uses: ./.github/workflows/nightly-pipeline.yml
+    with:
+      ref_name: ${{ needs.create_release_branch.outputs.release_branch }}

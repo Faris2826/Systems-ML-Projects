@@ -1,0 +1,224 @@
+name: Fast Release Nightly CI/CD Pipeline
+
+on:
+  schedule:
+    # 11 PM PDT -- (since GitHub Actions run in UTC)
+    - cron: '0 6 * * *'
+
+  # Run the workflow manually from the Actions tab
+  workflow_dispatch:
+
+  # Call workflow from other workflows
+  workflow_call:
+    inputs:
+      ref_name:
+        description: "Branch to run nightly tests on"
+        required: true
+        type: string
+
+jobs:
+  pre-commit-check:
+    name: "Pre-commit check"
+    if: github.server_url != 'https://github.com'
+    uses: ./.github/workflows/pre-commit.yml
+
+  set_ref_name:
+    name: Set ref_name to run nightly pipeline on
+    runs-on: ubuntu-latest
+    needs: pre-commit-check
+    outputs:
+      ref_name: ${{ steps.set_branch_name.outputs.REF_BRANCH }}
+    steps:
+      - name: Set input ref_name if provided, otherwise current working ref
+        id: set_branch_name
+        run: |
+          if [[ -n "${{ inputs.ref_name }}" ]]; then
+            REF_BRANCH="${{ inputs.ref_name }}"
+          else
+            REF_BRANCH="${{ github.ref_name }}"
+          fi
+
+          echo "REF_BRANCH=${REF_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "Using ref_name: ${REF_BRANCH} for nightly."
+
+  docker-tag:
+    name: Check if 'latest' tag could be used (no build docker images)
+    runs-on: ubuntu-latest
+    needs: set_ref_name
+    outputs:
+      tag: ${{ steps.tag.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.set_ref_name.outputs.ref_name }}
+      - name: "Set a docker image tag"
+        id: tag
+        shell: bash
+        run: |
+          set -x
+
+          # for the default branch (develop) we use "latest" tag and
+          # do not build the docker images
+          if [[ "${{ github.ref_name }}" == "${{ github.event.repository.default_branch }}" ]] ; then
+            tag="latest"
+          else
+            tag="$(git rev-parse --short HEAD)"
+          fi
+
+          echo "value=$tag" >> $GITHUB_OUTPUT
+
+  variants:
+    name: Define supported AIMET variants
+    runs-on: ubuntu-latest
+    needs: set_ref_name
+    outputs:
+      matrix: ${{ steps.final.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.set_ref_name.outputs.ref_name }}
+      - name: Torch variants
+        run: |
+          VALUE=$(echo "${VALUE:-"{}"}" | jq -c '.include += [
+              {
+                 "id":              "torch-cpu",
+                 "runs-on":         "ubuntu-latest",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "2.*",
+                 "VER_ONNXRUNTIME": "",
+                 "VER_CUDA":        "",
+                 "RUN_UNIT_TESTS":    "ON",
+                 "RUN_ACCEPTANCE_TESTS":    "ON",
+                 "BUILD_TARGETS":   "all",
+                 "PIP_INDEX":       ""
+              },
+              {
+                 "id":              "torch-gpu",
+                 "runs-on":         "k8s-gpu-release",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "2.*",
+                 "VER_ONNXRUNTIME": "",
+                 "VER_CUDA":        "12.1.1",
+                 "RUN_UNIT_TESTS":    "ON",
+                 "RUN_ACCEPTANCE_TESTS":    "ON",
+                 "BUILD_TARGETS":   "all",
+                 "PIP_INDEX":       ""
+              }
+            ]')
+          echo "VALUE=$VALUE" >> $GITHUB_ENV
+      - name: ONNX variants
+        run: |
+          VALUE=$(echo "${VALUE:-"{}"}" | jq -c '.include += [
+              {
+                 "id":              "onnx-cpu",
+                 "runs-on":         "ubuntu-latest",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "",
+                 "VER_ONNXRUNTIME": "1.19.2",
+                 "RUN_UNIT_TESTS":    "ON",
+                 "RUN_ACCEPTANCE_TESTS":    "ON",
+                 "BUILD_TARGETS":   "all",
+                 "PIP_INDEX":       ""
+              },
+              {
+                 "id":              "onnx-gpu",
+                 "runs-on":         "k8s-gpu-release",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "",
+                 "VER_ONNXRUNTIME": "1.19.2",
+                 "VER_CUDA":        "12.1.0",
+                 "RUN_UNIT_TESTS":    "ON",
+                 "RUN_ACCEPTANCE_TESTS":    "ON",
+                 "BUILD_TARGETS":   "all",
+                 "PIP_INDEX":       ""
+              }
+            ]')
+          echo "VALUE=$VALUE" >> $GITHUB_ENV
+
+      - name: Doc variants
+        run: |
+          VALUE=$(echo "${VALUE:-"{}"}" | jq -c '.include += [
+              {
+                 "id":              "onnx-torch-cpu",
+                 "runs-on":         "ubuntu-latest",
+                 "VER_PYTHON":      "3.10",
+                 "VER_TORCH":       "2.*",
+                 "VER_ONNXRUNTIME": "1.19.2",
+                 "VER_CUDA":        "",
+                 "RUN_UNIT_TESTS":    "OFF",
+                 "RUN_ACCEPTANCE_TESTS":    "OFF",
+                 "BUILD_TARGETS":   "all;doc",
+                 "PIP_INDEX":       ""
+              }
+            ]')
+          echo "VALUE=$VALUE" >> $GITHUB_ENV
+
+      - name: (Last step) Generate few extra properties for each variant
+        id: final
+        run: |
+          echo "value=$VALUE" >> $GITHUB_OUTPUT
+
+  docker-build-image:
+    name: Docker image ${{ matrix.id }}
+    runs-on: ubuntu-latest
+    needs: [ docker-tag, variants, set_ref_name ]
+    strategy:
+      matrix: ${{ fromJSON(needs.variants.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.set_ref_name.outputs.ref_name }}
+      - uses: ./.github/actions/docker-build-image
+        with:
+          dockerfile: Jenkins/fast-release/Dockerfile.ci
+          docker-login: ${{ secrets.DOCKER_LOGIN }}
+          docker-password: ${{ secrets.DOCKER_CREDENTIALS }}
+          docker-registry: ${{ vars.DOCKER_REGISTRY }}
+          image-name: "${{ vars.DOCKER_IMAGE }}-${{ matrix.id }}"
+          image-tag: ${{ needs.docker-tag.outputs.tag }}
+          build-args: |
+            VER_PYTHON=${{ matrix.VER_PYTHON }}
+            VER_CUDA=${{ matrix.VER_CUDA }}
+            VER_TORCH=${{ matrix.VER_TORCH }}
+            VER_ONNXRUNTIME=${{ matrix.VER_ONNXRUNTIME }}
+            AIMET_VARIANT=${{ matrix.id }}
+
+  call-build-wheels:
+    name: Call build-wheels
+    needs: [ docker-tag, variants, docker-build-image ]
+    uses: ./.github/workflows/build-wheels.yml
+    with:
+      variants: ${{ needs.variants.outputs.matrix }}
+      image-tag: ${{ needs.docker-tag.outputs.tag }}
+    secrets: inherit
+
+  call-unit-acceptance-tests:
+    name: Run unit and acceptance tests
+    needs: [ variants, call-build-wheels ]
+    uses: ./.github/workflows/run-unit-acceptance-tests.yml
+    with:
+      variants: ${{ needs.variants.outputs.matrix }}
+    secrets: inherit
+
+  cleanup:
+    needs: [ docker-tag, variants, call-build-wheels ]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix: ${{ fromJSON(needs.variants.outputs.matrix) }}
+    steps:
+      - name: Delete temp docker image
+        if: needs.docker-tag.outputs.tag != 'latest'
+        run: curl -k -H "Authorization:Bearer ${{ secrets.DOCKER_CREDENTIALS }}" -X DELETE "https://${{ vars.DOCKER_REGISTRY }}/v2/${{ vars.DOCKER_IMAGE }}-${{ matrix.id }}/manifests/${{ needs.docker-tag.outputs.tag }}" || true
+
+  notify_failure:
+    if: ${{ failure() && github.event_name == 'schedule' }}
+    name: Notify failure on slack
+    needs: [ call-build-wheels, call-unit-acceptance-tests ]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: slackapi/slack-github-action@v1.25.0
+      with:
+        channel-id: C0898PQVA31
+        slack-message: "AIMET Nightly Failed: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}/attempts/${{ github.run_attempt }}"
+      env:
+        SLACK_BOT_TOKEN: ${{ secrets.SLACK_NOTIFIER_TOKEN }}

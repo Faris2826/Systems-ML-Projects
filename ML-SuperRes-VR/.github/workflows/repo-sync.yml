@@ -1,0 +1,52 @@
+name: Forward AIMET commits to public repo
+
+on:
+  push:
+    branches:
+      - develop
+
+  workflow_call:
+    inputs:
+      src_branch:
+        description: "Internal source branch to sync"
+        required: false
+        default: "develop"
+        type: string
+      dst_branch:
+        description: "External destination branch to sync"
+        required: false
+        default: "develop"
+        type: string
+
+env:
+  DEFAULT_SRC_BRANCH: develop
+  DEFAULT_DST_BRANCH: develop
+
+jobs:
+
+  repo-sync:
+    if: github.server_url != 'https://github.com'
+    runs-on: ubuntu-latest
+    env:
+      INTERNAL_REPO_DIR: "aimet-repo"
+    steps:
+      - name: Checkout internal repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SRC_BRANCH }}
+          path: ${{ env.INTERNAL_REPO_DIR }}
+          fetch-depth: 0
+      - name: Push to public repository
+        run: |
+          # Set src and dst branch as per workflow event
+          if [[ ${{ github.event_name }} == "push" ]]; then
+            SRC_BRANCH="${{ env.DEFAULT_SRC_BRANCH }}"
+            DST_BRANCH="${{ env.DEFAULT_DST_BRANCH }}"
+          else
+            SRC_BRANCH="${{ inputs.src_branch }}"
+            DST_BRANCH="${{ inputs.dst_branch }}"
+          fi
+
+          cd ${INTERNAL_REPO_DIR}
+          git remote add public-origin https://${{ secrets.AIMET_CI }}@github.com/quic/aimet.git
+          git push public-origin $SRC_BRANCH:$DST_BRANCH

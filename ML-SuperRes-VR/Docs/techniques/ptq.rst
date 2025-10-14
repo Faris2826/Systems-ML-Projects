@@ -1,0 +1,294 @@
+.. _techniques-ptq:
+
+##########################
+Post Training Quantization
+##########################
+
+Post-Training Quantization (PTQ) is the process of determining the appropriate scale and offset parameters for the quantizers inserted into a model’s computation graph.
+While quantization parameters for weights can typically be precomputed,
+determining parameters for activations requires running a small, representative dataset through the model to collect range statistics.
+
+This process of computing scale and offset values is commonly referred to as calibration.
+
+Both `aimet-onnx <https://pypi.org/project/aimet-onnx/>`_ or `aimet-torch <https://pypi.org/project/aimet-torch/>`_ supports PTQ.
+
+.. image:: ../images/techniques/ptq_overview.png
+
+We recommend using `aimet-onnx <https://pypi.org/project/aimet-onnx/>`_ for PTQ for the following reasons:
+
+1. Captured graph
+    * Optimize model before quantization
+2. Better alignment downstream
+    * PyTorch may export certain operation to multiple operations in ONNX leading to missing quantizer information.
+    * This missing quantizer information could lead to accuracy difference between on-target and off-target(simulation).
+
+Workflow
+========
+
+.. image:: ../images/techniques/ptq.png
+
+Let’s take an example for calibrating a MobileNetV2 model.
+
+Prerequisites
+-------------
+
+1. Download ImageNet dataset
+
+.. code-block:: bash
+
+    wget -P ./imagenet_dataset https://image-net.org/data/ILSVRC/2012/ILSVRC2012_devkit_t12.tar.gz
+    wget -P ./imagenet_dataset https://image-net.org/data/ILSVRC/2012/ILSVRC2012_img_val.tar
+
+If you already have imagenet dataset locally that you would like to use, simply replace dataset path from `imagenet_dataset` later.
+
+2. Load PyTorch model and dataset
+
+.. note::
+
+    The examples below use a pre-trained MobileNetV2 model. You can also load your model instead.
+
+.. tab-set::
+    :sync-group: platform
+
+    .. tab-item:: PyTorch
+        :sync: torch
+
+        .. important::
+
+            aimet_torch 2 is fully backward compatible with all the public APIs of aimet_torch 1.x. If you are
+            using low-level components of :class:`QuantizationSimModel`, see the :doc:`aimet_torch 1 to aimet_torch 2 Migration Guide<../apiref/torch/migration_guide>`.
+
+        .. literalinclude:: ../snippets/torch/apply_quantsim.py
+           :language: python
+           :start-after: # PyTorch imports
+           :end-before: # End of PyTorch imports
+
+        To perform quantization simulation with :mod:`aimet_torch`, your model definition must conform to
+        the guidelines at :ref:`PyTorch model guidelines <torch-model-guidelines>`.
+        For example, :func:`torch.nn.functional` defined in the forward pass should be changed to the equivalent
+        :class:`torch.nn.Module`.
+
+        .. literalinclude:: ../snippets/torch/apply_quantsim.py
+           :language: python
+           :start-after: # Load the model
+           :end-before:  # End of load the model
+
+        .. literalinclude:: ../snippets/torch/apply_quantsim.py
+           :language: python
+           :start-after: # Dataloaders
+           :end-before:  # End of dataloaders
+
+    .. tab-item:: ONNX
+        :sync: onnx
+
+        .. literalinclude:: ../snippets/onnx/apply_quantsim.py
+            :language: python
+            :start-after: # imports start
+            :end-before: # imports end
+
+        .. literalinclude:: ../snippets/onnx/apply_quantsim.py
+            :language: python
+            :start-after: # Load the model
+            :end-before:  # End of loading the model
+
+        .. literalinclude:: ../snippets/onnx/apply_quantsim.py
+            :language: python
+            :start-after: # Set up dataloader
+            :end-before:  # End of setting up dataloader
+
+        Optionally simplify the exported onnx graph before quantization. This is not strictly required but
+        may improve accuracy and runtime performance.
+
+        .. literalinclude:: ../snippets/onnx/apply_quantsim.py
+            :language: python
+            :start-after: # Prepare model with onnx-simplifier
+            :end-before:  # End of prepare model
+
+
+Step 1: Creating a QuantSim model
+---------------------------------
+
+Use AIMET to create a :class:`QuantizationSimModel`. AIMET inserts
+fake quantization operations in the model graph and configures them.
+
+.. tab-set::
+    :sync-group: platform
+
+    .. tab-item:: PyTorch
+        :sync: torch
+
+        .. literalinclude:: ../snippets/torch/apply_quantsim.py
+           :language: python
+           :start-after: # Create Quantization Simulation Model
+           :end-before:  # End of QuantizationSimModel
+
+    .. tab-item:: ONNX
+        :sync: onnx
+
+        .. literalinclude:: ../snippets/onnx/apply_quantsim.py
+            :language: python
+            :start-after: # Create QuantSim object
+            :end-before:  # End of creating QuantSim object
+
+
+Step 2: Creating a calibration callback
+---------------------------------------
+
+Before you can use the :class:`QuantizationSimModel` for inference or training, you must compute
+scale and offset quantization parameters for each 'quantizer' node.
+
+Create a routine to pass small, representative data samples through the model. A quick way to do this
+is to use the existing train or validation data loader to extract samples and pass them
+to the model.
+
+500 to 1000 representative data samples are sufficient to compute the quantization parameters.
+
+.. tab-set::
+    :sync-group: platform
+
+    .. tab-item:: PyTorch
+        :sync: torch
+
+        .. literalinclude:: ../snippets/torch/apply_quantsim.py
+           :language: python
+           :start-after: # Calibration callback
+           :end-before:  # End of calibration callback
+
+    .. tab-item:: ONNX
+        :sync: onnx
+
+        .. literalinclude:: ../snippets/onnx/apply_quantsim.py
+            :language: python
+            :start-after: # Calibration callback
+            :end-before:  # End of calibration callback
+
+Step 3: Computing encodings
+---------------------------
+
+Next, call :func:`QuantizationSimModel.compute_encodings` to use the callback to pass representative
+data through the quantized model. The quantizers in the quantized model use the observed inputs
+to initialize their quantization encodings. "Encodings" refers to the scale and offset quantization parameters.
+
+.. tab-set::
+    :sync-group: platform
+
+    .. tab-item:: PyTorch
+        :sync: torch
+
+        .. literalinclude:: ../snippets/torch/apply_quantsim.py
+           :language: python
+           :start-after: # Compute the Quantization Encodings
+           :end-before:  # End of compute_encodings
+
+    .. tab-item:: ONNX
+        :sync: onnx
+
+        In onnx, calibration can be done through a callback function or by passing calibration
+        data directly as an iterable of model inputs (:class:`Iterable[Dict[str, np.ndarray]]`)
+
+        .. literalinclude:: ../snippets/onnx/apply_quantsim.py
+            :language: python
+            :start-after: # Compute quantization encodings
+            :end-before:  # End of computing quantization encodings
+
+Step 4: Evaluation
+------------------
+
+Next, evaluate the :class:`QuantizationSimModel` to measure the model’s accuracy after quantization.
+
+.. tab-set::
+    :sync-group: platform
+
+    .. tab-item:: PyTorch
+        :sync: torch
+
+        .. literalinclude:: ../snippets/torch/apply_quantsim.py
+           :language: python
+           :start-after: # Evaluation
+           :end-before:  # End of evaluation
+
+    .. tab-item:: ONNX
+        :sync: onnx
+
+        .. literalinclude:: ../snippets/onnx/apply_quantsim.py
+            :language: python
+            :start-after: # Evaluate quantized accuracy
+            :end-before:  # End of quantized accuracy
+
+        .. rst-class:: script-output
+
+            .. code-block:: none
+
+                Quantized accuracy (W8A16): 0.7173
+
+Step 5: Exporting the model
+---------------------------
+
+If the off-target accuracy of the quantized model is within acceptable limits (Step 4), we can proceed with deployment and export the model to ONNX format.
+During export, all intermediate quantization operations are removed, and the quantization parameters—scale and offset—are serialized into a JSON file.
+
+.. tab-set::
+    :sync-group: platform
+
+    .. tab-item:: PyTorch
+        :sync: torch
+
+        .. literalinclude:: ../snippets/torch/apply_quantsim.py
+            :language: python
+            :start-after: # Export
+            :end-before: # End of export
+
+    .. tab-item:: ONNX
+        :sync: onnx
+
+        .. literalinclude:: ../snippets/onnx/apply_quantsim.py
+            :language: python
+            :start-after: # Export the model
+            :end-before: # End of exporting the model
+
+API
+===
+
+.. tab-set::
+    :sync-group: platform
+
+    .. tab-item:: PyTorch
+        :sync: torch
+
+        **Top level APIs**
+
+        .. autoclass:: aimet_torch.quantsim.QuantizationSimModel
+            :members: compute_encodings, export, load_encodings
+            :member-order: bysource
+            :no-index:
+
+        **Quant Scheme Enum**
+
+        .. autoclass:: aimet_common.defs.QuantScheme
+            :members:
+            :noindex:
+
+    .. tab-item:: ONNX
+        :sync: onnx
+
+
+        **Top level APIs**
+
+        .. autoclass:: aimet_onnx.quantsim.QuantizationSimModel
+            :members: compute_encodings, export
+            :member-order: bysource
+            :noindex:
+
+        .. note::
+
+            - We recommend you use onnx-simplifier before creating the QuantSim model.
+            - Since ONNX Runtime is used for optimized inference only, ONNX framework supports Post Training Quantization schemes (such as TF or TF-enhanced) to compute the encodings.
+
+        .. autofunction:: aimet_onnx.quantsim.load_encodings_to_sim
+            :noindex:
+
+        **Quant Scheme Enum**
+
+        .. autoclass:: aimet_common.defs.QuantScheme
+            :members:
+            :noindex:
