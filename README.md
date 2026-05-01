@@ -8,7 +8,17 @@
 | TensorRT-LLM | Python | 2.3× throughput vs vanilla PyTorch |
 | ML-SuperRes-VR | PyTorch | 4× upsample &lt; 11 ms on Quest 3 |
 
-## CV
-`True-Internship-CV.docx` – SWE intern résumé (ATS clean).
 
+### Vulkan Forward+ Renderer
+- High-performance rendering engine (C++, Vulkan)
+- Supports 100+ dynamic lights at 60 FPS
+- Includes lock-free job system for parallel work
 
+### TensorRT LLM Inference
+- Optimised LLM inference on GPU (CUDA, TensorRT)
+- Reduced binary size and improved throughput
+- Achieved ~128 tokens/sec on RTX 3060
+
+### Stable-DreamFusion (3D Generation)
+- Text-to-3D mesh generation pipeline
+- Improved stability and fixed CUDA compatibility issues
