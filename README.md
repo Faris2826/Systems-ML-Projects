@@ -1,4 +1,8 @@
-# Meta SWE Intern Bundle – Faris Ali Khan
+# Systems and Ml Projects– Faris Ali Khan
+
+## Introduction
+Hi this is just a few of the projects I've built to display some skills I have in regard to ML and systems engineering. All of the work is clean, sanitized and relatively adaptable to most devices. I built these projects during my summer break in 2025.
+
 
 ## Projects
 | Folder | Tech | One-liner |
