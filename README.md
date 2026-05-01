@@ -22,3 +22,8 @@
 ### Stable-DreamFusion (3D Generation)
 - Text-to-3D mesh generation pipeline
 - Improved stability and fixed CUDA compatibility issues
+
+### AIMET VR Super-Resolution
+- Implemented INT8-optimised ESRGAN model for VR applications
+- Achieved ~1.8× performance improvement while maintaining 90 FPS
+- Focused on real-time inference and optimisation for VR workloads
